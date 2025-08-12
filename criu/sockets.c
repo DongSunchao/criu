@@ -11,6 +11,7 @@
 #include <netinet/in.h>
 #include <linux/version.h>
 
+
 #include "int.h"
 #include "bitops.h"
 #include "libnetlink.h"
@@ -650,6 +651,8 @@ int do_dump_opt(int sk, int level, int name, void *val, int len)
 	return 0;
 }
 
+
+
 int dump_socket_opts(int sk, SkOptsEntry *soe)
 {
 	int ret = 0, val;
@@ -689,7 +692,7 @@ int dump_socket_opts(int sk, SkOptsEntry *soe)
 	soe->so_reuseport = val ? true : false;
 	soe->has_so_reuseport = true;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,16,0)
-    if(sk_may_scm_recv(sk) ){
+    if(sk->sk_family == AF_UNIX || sk->sk_family == AF_NETLINK ||  sk->sk_family == AF_BLUETOOTH){
 	ret |= dump_opt(sk, SOL_SOCKET, SO_PASSCRED, &val);
 	soe->has_so_passcred = true;
 	soe->so_passcred = val ? true : false;
