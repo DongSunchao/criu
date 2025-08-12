@@ -692,7 +692,12 @@ int dump_socket_opts(int sk, SkOptsEntry *soe)
 	soe->so_reuseport = val ? true : false;
 	soe->has_so_reuseport = true;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,16,0)
-    if(sk->sk_family == AF_UNIX || sk->sk_family == AF_NETLINK ||  sk->sk_family == AF_BLUETOOTH){
+	struct sockaddr_storage addr;
+	socklen_t addrlen = sizeof(addr);
+	if (getsockname(sockfd, (struct sockaddr *)&addr, &addrlen) == -1) {
+		perror("getsockname fail");
+	}
+	if (addr.ss_family == AF_UNIX || addr.ss_family == AF_NETLINK || addr.ss_family == AF_BLUETOOTH) {
 	ret |= dump_opt(sk, SOL_SOCKET, SO_PASSCRED, &val);
 	soe->has_so_passcred = true;
 	soe->so_passcred = val ? true : false;
@@ -702,13 +707,10 @@ int dump_socket_opts(int sk, SkOptsEntry *soe)
 	soe->so_passsec = val ? true : false;
 	}
 #else
-    ret |= dump_opt(sk, SOL_SOCKET, SO_PASSCRED, &val);
-	soe->has_so_passcred = true;
-	soe->so_passcred = val ? true : false;
-
-	ret |= dump_opt(sk, SOL_SOCKET, SO_PASSSEC, &val);
-	soe->has_so_passsec = true;
-	soe->so_passsec = val ? true : false;
+	soe->has_so_passcred = false;
+	soe->so_passcred =  false;
+	soe->has_so_passsec = false;
+	soe->so_passsec =  false;
 #endif
 	
 	ret |= dump_opt(sk, SOL_SOCKET, SO_DONTROUTE, &val);
