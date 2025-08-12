@@ -9,6 +9,7 @@
 #include <linux/filter.h>
 #include <string.h>
 #include <netinet/in.h>
+#include <linux/version.h>
 
 #include "int.h"
 #include "bitops.h"
