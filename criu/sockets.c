@@ -698,7 +698,7 @@ int dump_socket_opts(int sk, SkOptsEntry *soe)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,16,0)
 
 	if (getsockname(sk, (struct sockaddr *)&addr, &addrlen) == -1) {
-		perror("getsockname fail");
+		pr_perror("Can't set %d", sk);
 	}
 	if (addr.ss_family == AF_UNIX || addr.ss_family == AF_NETLINK || addr.ss_family == AF_BLUETOOTH) {
 	ret |= dump_opt(sk, SOL_SOCKET, SO_PASSCRED, &val);
