@@ -655,6 +655,10 @@ int do_dump_opt(int sk, int level, int name, void *val, int len)
 
 int dump_socket_opts(int sk, SkOptsEntry *soe)
 {
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6,16,0)
+	struct sockaddr_storage addr;
+	socklen_t addrlen = sizeof(addr);
+#endif
 	int ret = 0, val;
 	struct timeval tv;
 	struct linger so_linger = { 0, 0 };
@@ -692,9 +696,7 @@ int dump_socket_opts(int sk, SkOptsEntry *soe)
 	soe->so_reuseport = val ? true : false;
 	soe->has_so_reuseport = true;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,16,0)
-	struct sockaddr_storage addr;
-	socklen_t addrlen = sizeof(addr);
-	if (getsockname(sockfd, (struct sockaddr *)&addr, &addrlen) == -1) {
+	if (getsockname(sk, (struct sockaddr *)&addr, &addrlen) == -1) {
 		perror("getsockname fail");
 	}
 	if (addr.ss_family == AF_UNIX || addr.ss_family == AF_NETLINK || addr.ss_family == AF_BLUETOOTH) {
