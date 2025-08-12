@@ -696,7 +696,6 @@ int dump_socket_opts(int sk, SkOptsEntry *soe)
 	soe->so_reuseport = val ? true : false;
 	soe->has_so_reuseport = true;
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6,16,0)
-
 	if (getsockname(sk, (struct sockaddr *)&addr, &addrlen) == -1) {
 		pr_perror("Can't set %d", sk);
 	}
@@ -718,7 +717,7 @@ int dump_socket_opts(int sk, SkOptsEntry *soe)
 	soe->has_so_passsec = true;
 	soe->so_passsec = val ? true : false;
 #endif
-	
+
 	ret |= dump_opt(sk, SOL_SOCKET, SO_DONTROUTE, &val);
 	soe->has_so_dontroute = true;
 	soe->so_dontroute = val ? true : false;
