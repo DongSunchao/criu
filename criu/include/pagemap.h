@@ -44,7 +44,7 @@
 
 struct page_read {
 	/* reads page from current pagemap */
-	int (*read_pages)(struct page_read *, unsigned long vaddr, int nr, void *, unsigned flags);
+	int (*read_pages)(struct page_read *, unsigned long vaddr, unsigned long nr, void *, unsigned flags);
 	/* Advance page_read to the next entry */
 	int (*advance)(struct page_read *pr);
 	void (*close)(struct page_read *);
@@ -52,8 +52,8 @@ struct page_read {
 	int (*sync)(struct page_read *pr);
 	int (*seek_pagemap)(struct page_read *pr, unsigned long vaddr);
 	void (*reset)(struct page_read *pr);
-	int (*io_complete)(struct page_read *, unsigned long vaddr, int nr);
-	int (*maybe_read_page)(struct page_read *pr, unsigned long vaddr, int nr, void *buf, unsigned flags);
+	int (*io_complete)(struct page_read *, unsigned long vaddr, unsigned long nr);
+	int (*maybe_read_page)(struct page_read *pr, unsigned long vaddr, unsigned long nr, void *buf, unsigned flags);
 
 	/* Whether or not pages can be read in PIE code */
 	bool pieok;
@@ -121,7 +121,7 @@ extern int dedup_one_iovec(struct page_read *pr, unsigned long base, unsigned lo
 
 static inline unsigned long pagemap_len(PagemapEntry *pe)
 {
-	return (unsigned long)pe->nr_pages * PAGE_SIZE;
+	return pe->nr_pages * PAGE_SIZE;
 }
 
 static inline bool page_read_has_parent(struct page_read *pr)
