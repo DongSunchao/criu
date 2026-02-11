@@ -701,6 +701,7 @@ int parse_options(int argc, char **argv, bool *usage_error, bool *has_exec_cmd, 
 		BOOL_OPT("skip-file-rwx-check", &opts.skip_file_rwx_check),
 		{ "lsm-mount-context", required_argument, 0, 1099 },
 		{ "network-lock", required_argument, 0, 1100 },
+		{ "compress-lz4", no_argument, 0, 1101 },
 		BOOL_OPT("mntns-compat-mode", &opts.mntns_compat_mode),
 		BOOL_OPT("unprivileged", &opts.unprivileged),
 		BOOL_OPT("ghost-fiemap", &opts.ghost_fiemap),
@@ -1044,6 +1045,8 @@ int parse_options(int argc, char **argv, bool *usage_error, bool *has_exec_cmd, 
 				pr_err("Invalid value for --network-lock: %s\n", optarg);
 				return 1;
 			}
+		case 1101:
+			opts.compress_lz4 = true;
 			break;
 		case 'V':
 			pr_msg("Version: %s\n", CRIU_VERSION);

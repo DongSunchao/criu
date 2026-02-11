@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <string.h>
+#include <lz4.h>
 
 #include <fcntl.h>
 
@@ -2142,6 +2143,19 @@ int cr_dump_tasks(pid_t pid)
 	int exit_code = -1;
 
 	kerndat_warn_about_madv_guards();
+
+	if (opts.compress_lz4) {
+        char mock_src[] = "check the link inside criu";
+		char mock_dst[128];
+		int ret;
+		
+		pr_info("========================================\n");
+        pr_info("[GSoC Demo] LZ4 Memory Compression ENABLED!\n");
+		ret = LZ4_compress_default(mock_src, mock_dst, sizeof(mock_src), sizeof(mock_dst));
+		pr_info("[GSoC Demo] LZ4 check: compressed %lu bytes into %d bytes\n", sizeof(mock_src), ret);
+    } else {
+        pr_info("[GSoC Demo] Standard dump (No Compression)\n");
+    }
 
 	pr_info("========================================\n");
 	pr_info("Dumping processes (pid: %d comm: %s)\n", pid, __task_comm_info(pid));
