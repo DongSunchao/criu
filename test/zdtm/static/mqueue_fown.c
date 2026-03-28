@@ -172,11 +172,11 @@ int main(int argc, char **argv)
 	}
 
 	/*
-	 * Ownership must be preserved.  CRIU stores uid/gid in the fown
-	 * protobuf field and restores them via rst_file_params().  A mismatch
-	 * here would mean fown was silently dropped or incorrectly remapped —
-	 * exactly the failure mode that user-namespace UID remapping can
-	 * trigger.
+	 * Filesystem ownership must be preserved.  CRIU saves st_uid/st_gid
+	 * in the uid/gid fields of ipcns_pmq_data_entry and calls fchown(2)
+	 * after mq_open() on restore.  A mismatch here means the ownership
+	 * round-trip is broken — exactly the failure mode that Kubernetes
+	 * user-namespace UID remapping would expose.
 	 */
 	if (st_after.st_uid != expected_uid) {
 		fail("uid mismatch after restore: got %u expected %u",

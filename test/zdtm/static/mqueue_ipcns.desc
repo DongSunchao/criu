@@ -1,1 +1,1 @@
-{'flavor': 'h', 'flags': 'suid'}
+{'flavor': 'h',"opts": "--enable-fs mqueue","flags": "suid"}

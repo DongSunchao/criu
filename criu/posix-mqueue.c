@@ -138,6 +138,7 @@ static int dump_one_pmq_fd(int lfd, u32 id, const struct fd_parms *p)
 	FileEntry fe = FILE_ENTRY__INIT;
 	struct mqueue_message *msgs = NULL;
 	struct mq_attr attr;
+	struct stat st;
 	char path[PATH_MAX];
 	int ret = -1;
 	int i;
@@ -145,6 +146,22 @@ static int dump_one_pmq_fd(int lfd, u32 id, const struct fd_parms *p)
 	if (mq_getattr((mqd_t)lfd, &attr) < 0) {
 		pr_perror("Can't get mqueue attributes for fd %d", lfd);
 		return -1;
+	}
+
+	/*
+	 * Save the filesystem ownership (st_uid / st_gid) of the mqueue file.
+	 * This is separate from the SIGIO signal-delivery owner stored in
+	 * fown_entry.  Without saving these, restoring a queue that was
+	 * originally created by an unprivileged process (e.g. in a user
+	 * namespace) would leave it owned by root after restore.
+	 */
+	if (fstat(lfd, &st) == 0) {
+		pmq.uid     = st.st_uid;
+		pmq.has_uid = 1;
+		pmq.gid     = st.st_gid;
+		pmq.has_gid = 1;
+	} else {
+		pr_perror("fstat fd %d for ownership (non-fatal)", lfd);
 	}
 
 	if (read_fd_link(lfd, path, sizeof(path)) < 0) {
@@ -351,6 +368,31 @@ static int pmq_open(struct file_desc *d, int *new_fd)
 	} else {
 		pr_info("Restored POSIX mqueue '%s' with %zu messages\n",
 			pmq->name, pmq->n_messages);
+	}
+
+	/*
+	 * Restore filesystem ownership (uid / gid) of the mqueue file.
+	 *
+	 * CRIU runs as root and mq_open() above created the queue owned by
+	 * root.  If the original process ran as an unprivileged user (e.g. in
+	 * a Kubernetes user-namespace pod), we must fchown() the fd back to
+	 * the original owner so that the restored process sees the same
+	 * st_uid / st_gid it had before the checkpoint.
+	 *
+	 * fchown(2) on a mqd_t (which is just an int file descriptor) works
+	 * because the mqueue filesystem supports the setattr inode operation.
+	 */
+	if (pmq->has_uid && pmq->has_gid &&
+	    (pmq->uid != 0 || pmq->gid != 0)) {
+		if (fchown((int)mq, (uid_t)pmq->uid, (gid_t)pmq->gid) < 0) {
+			pr_perror("Failed to restore ownership (uid=%u gid=%u)"
+				  " of mqueue %s",
+				  pmq->uid, pmq->gid, open_name);
+			mq_close(mq);
+			return -1;
+		}
+		pr_info("Restored mqueue '%s' ownership: uid=%u gid=%u\n",
+			pmq->name, pmq->uid, pmq->gid);
 	}
 
 	if (rst_file_params(mq, pmq->fown, pmq->flags)) {

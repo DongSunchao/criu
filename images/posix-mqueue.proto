@@ -30,4 +30,15 @@ message ipcns_pmq_data_entry {
      * state at dump time.
      */
     optional bool unlinked = 9 [default = false];
+
+    /*
+     * Filesystem ownership of the mqueue file (st_uid / st_gid from
+     * fstat(2)).  This is distinct from fown_entry which carries the
+     * SIGIO signal-delivery owner (F_GETOWN_EX).  Saved so that
+     * restore can fchown(2) the newly-created queue back to the
+     * original owner — necessary when the dumped process ran as an
+     * unprivileged user (e.g. in a Kubernetes user-namespace pod).
+     */
+    optional uint32 uid = 10;
+    optional uint32 gid = 11;
 }
