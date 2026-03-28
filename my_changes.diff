@@ -1,0 +1,688 @@
+diff --git a/criu/Makefile.crtools b/criu/Makefile.crtools
+index 6dd0258ad..ba6132d2f 100644
+--- a/criu/Makefile.crtools
++++ b/criu/Makefile.crtools
+@@ -102,7 +102,6 @@ CFLAGS_REMOVE_vdso-compat.o	+= $(CFLAGS-ASAN) $(CFLAGS-GCOV)
+ obj-y			+= pidfd-store.o
+ obj-y			+= hugetlb.o
+ obj-y			+= pidfd.o
+-obj-y			+= posix-mqueue.o
+ 
+ PROTOBUF_GEN := scripts/protobuf-gen.sh
+ 
+diff --git a/criu/Makefile.packages b/criu/Makefile.packages
+index 6cac55256..3e2e6efd1 100644
+--- a/criu/Makefile.packages
++++ b/criu/Makefile.packages
+@@ -37,7 +37,7 @@ check-packages-failed:
+ 	$(warning To run tests the following packages are needed)
+ 	$(warning RPM based distros: $(REQ-RPM-PKG-TEST-NAMES))
+ 	$(warning DEB based distros: $(REQ-DEB-PKG-TEST-NAMES))
+-	$(warning Compilation aborted)
++	$(error Compilation aborted)
+ 
+ #
+ # Make sure all required libs are installed
+diff --git a/criu/files.c b/criu/files.c
+index 1c0ce53f3..af4b8aeac 100644
+--- a/criu/files.c
++++ b/criu/files.c
+@@ -4,7 +4,6 @@
+ 
+ #include <linux/limits.h>
+ #include <linux/major.h>
+-#include <linux/magic.h>
+ 
+ #include <sys/types.h>
+ #include <sys/prctl.h>
+@@ -51,7 +50,6 @@
+ #include "fdstore.h"
+ #include "bpfmap.h"
+ #include "pidfd.h"
+-#include "posix-mqueue.h"
+ 
+ #include "protobuf.h"
+ #include "util.h"
+@@ -61,11 +59,6 @@
+ #include "plugin.h"
+ 
+ #define FDESC_HASH_SIZE 64
+-
+-#ifndef MQUEUE_MAGIC
+-#define MQUEUE_MAGIC 0x19800202
+-#endif
+-
+ static struct hlist_head file_desc_hash[FDESC_HASH_SIZE];
+ /* file_desc's, which fle is not owned by a process, that is able to open them */
+ static LIST_HEAD(fake_master_head);
+@@ -569,11 +562,6 @@ static int dump_one_file(struct pid *pid, int fd, int lfd, struct fd_opts *opts,
+ 		return do_dump_gen_file(&p, lfd, ops, e);
+ 	}
+ 
+-	if (p.fs_type == MQUEUE_MAGIC) {
+-        pr_info("PoC[GSoC]:Intercepted POSIX mqueue (fd: %d)\n", fd);
+-        return dump_pmq_fd(lfd, &p, e); 
+-    }
+-
+ 	if (S_ISREG(p.stat.st_mode) || S_ISDIR(p.stat.st_mode) || S_ISLNK(p.stat.st_mode)) {
+ 		if (fill_fdlink(lfd, &p, &link))
+ 			return -1;
+diff --git a/criu/image-desc.c b/criu/image-desc.c
+index eef12c8a2..c68ea04d7 100644
+--- a/criu/image-desc.c
++++ b/criu/image-desc.c
+@@ -63,7 +63,6 @@ struct cr_fd_desc_tmpl imgset_template[CR_FD_MAX] = {
+ 	FD_ENTRY_F(IPCNS_SHM,	"ipcns-shm-%u", O_NOBUF), /* writes segments of data */
+ 	FD_ENTRY(IPCNS_MSG,	"ipcns-msg-%u"),
+ 	FD_ENTRY(IPCNS_SEM,	"ipcns-sem-%u"),
+-	FD_ENTRY(IPCNS_PMQ_DATA, "ipcns-pmq-%u"),
+ 	FD_ENTRY(FS,		"fs-%u"),
+ 	FD_ENTRY(REMAP_FPATH,	"remap-fpath"),
+ 	FD_ENTRY_F(GHOST_FILE,	"ghost-file-%x", O_NOBUF),
+diff --git a/criu/include/files.h b/criu/include/files.h
+index ceb26fd71..31ebb0ca0 100644
+--- a/criu/include/files.h
++++ b/criu/include/files.h
+@@ -2,7 +2,6 @@
+ #define __CR_FILES_H__
+ 
+ #include <sys/stat.h>
+-#include <linux/magic.h>
+ 
+ #include "int.h"
+ #include "common/compiler.h"
+diff --git a/criu/include/fs-magic.h b/criu/include/fs-magic.h
+index e16638e10..ffc0455d5 100644
+--- a/criu/include/fs-magic.h
++++ b/criu/include/fs-magic.h
+@@ -61,8 +61,4 @@
+ #define PID_FS_MAGIC 0x50494446
+ #endif
+ 
+-#ifndef POSIX_MQUEUE_MAGIC
+-#define POSIX_MQUEUE_MAGIC 0x19800202
+-#endif
+-
+ #endif /* __CR_FS_MAGIC_H__ */
+diff --git a/criu/include/image-desc.h b/criu/include/image-desc.h
+index 9ba928bf6..79e1ac111 100644
+--- a/criu/include/image-desc.h
++++ b/criu/include/image-desc.h
+@@ -34,7 +34,6 @@ enum {
+ 	CR_FD_IPCNS_SHM,
+ 	CR_FD_IPCNS_MSG,
+ 	CR_FD_IPCNS_SEM,
+-	CR_FD_IPCNS_PMQ_DATA,
+ 	_CR_FD_IPCNS_TO,
+ 
+ 	_CR_FD_NETNS_FROM,
+diff --git a/criu/include/magic.h b/criu/include/magic.h
+index 09f942255..6f0aff26d 100644
+--- a/criu/include/magic.h
++++ b/criu/include/magic.h
+@@ -58,7 +58,6 @@
+ #define IPCNS_SHM_MAGIC	     0x46283044 /* Odessa */
+ #define IPCNS_MSG_MAGIC	     0x55453737 /* Moscow */
+ #define IPCNS_SEM_MAGIC	     0x59573019 /* St. Petersburg */
+-#define IPCNS_PMQ_DATA_MAGIC    0x504d5131
+ #define REG_FILES_MAGIC	     0x50363636 /* Belgorod */
+ #define EXT_FILES_MAGIC	     0x59255641 /* Usolye */
+ #define FS_MAGIC	     0x51403912 /* Voronezh */
+diff --git a/criu/include/posix-mqueue.h b/criu/include/posix-mqueue.h
+deleted file mode 100644
+index c244b52fc..000000000
+--- a/criu/include/posix-mqueue.h
++++ /dev/null
+@@ -1,39 +0,0 @@
+-#ifndef __CR_MQUEUE_H__
+-#define __CR_MQUEUE_H__
+-
+-#include <mqueue.h>
+-#include <stdint.h>
+-#include "files.h"
+-#include "images/posix-mqueue.pb-c.h"
+-
+-struct mqueue_message {
+-    uint32_t prio;
+-    uint32_t len;
+-    char *data;
+-};
+-
+-
+-extern struct collect_image_info pmqfd_cinfo;
+-
+-struct mqueue_file_info {
+-    IpcnsPmqDataEntry *mfe;
+-    struct file_desc d;
+-    int fd;
+-    struct list_head rlist;
+-};
+-
+-static inline uint32_t hash_mqueue_name(const char *name) {
+-    uint32_t hash = 5381;
+-    int c;
+-
+-    while ((c = *name++))
+-        hash = ((hash << 5) + hash) + c;
+-
+-    return hash;
+-}
+-
+-extern int dump_pmq_fd(int lfd, struct fd_parms *p, FdinfoEntry *e);
+-
+-extern int pmq_peek_messages(int fd, struct mqueue_message *msgs, long nmsgs, long msgsize);
+-
+-#endif /* __CR_MQUEUE_H__ */
+\ No newline at end of file
+diff --git a/criu/include/protobuf-desc.h b/criu/include/protobuf-desc.h
+index ba70eb5bb..c4241be55 100644
+--- a/criu/include/protobuf-desc.h
++++ b/criu/include/protobuf-desc.h
+@@ -20,7 +20,6 @@ enum {
+ 	PB_IPC_VAR,
+ 	PB_IPC_SHM,
+ 	PB_IPC_SEM,
+-	PB_IPCNS_PMQ_DATA,
+ 	PB_MNT,
+ 	PB_PSTREE,
+ 	PB_GHOST_FILE,
+diff --git a/criu/ipc_ns.c b/criu/ipc_ns.c
+index 3d5e5d094..7e95be8c5 100644
+--- a/criu/ipc_ns.c
++++ b/criu/ipc_ns.c
+@@ -8,7 +8,6 @@
+ #include <sys/shm.h>
+ #include <sched.h>
+ 
+-
+ #include "util.h"
+ #include "cr_options.h"
+ #include "imgset.h"
+@@ -17,7 +16,6 @@
+ #include "ipc_ns.h"
+ #include "shmem.h"
+ #include "types.h"
+-#include "mqueue.h"
+ 
+ #include "protobuf.h"
+ #include "images/ipc-var.pb-c.h"
+diff --git a/criu/kerndat.c b/criu/kerndat.c
+index e01474efe..1e4863190 100644
+--- a/criu/kerndat.c
++++ b/criu/kerndat.c
+@@ -1805,14 +1805,6 @@ static int __has_binfmt_misc_sandboxing(void *arg)
+ 	int ret, mnt_fd;
+ 
+ 	if (unshare(CLONE_NEWNS | CLONE_NEWUSER)) {
+-		if (errno == EINVAL || errno == EPERM || errno == ENOSYS) {
+-			/* Kernel doesn't support user namespaces or they are
+-			 * restricted; binfmt_misc sandboxing is not available. */
+-			if (has_arg != NULL) {
+-				has_arg->has = false;
+-			}
+-			return 0;
+-		}
+ 		pr_perror("Failed to unshare namespaces");
+ 		return 1;
+ 	}
+diff --git a/criu/posix-mqueue.c b/criu/posix-mqueue.c
+deleted file mode 100644
+index 2d96fecd0..000000000
+--- a/criu/posix-mqueue.c
++++ /dev/null
+@@ -1,212 +0,0 @@
+-#include <unistd.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <sys/ioctl.h>
+-#include <sys/stat.h>
+-#include <fcntl.h>
+-#include <mqueue.h>
+-
+-#include "imgset.h"
+-#include "files.h"
+-#include "image.h"
+-#include "log.h"
+-#include "util.h"
+-#include "xmalloc.h"
+-#include "posix-mqueue.h"
+-#include "protobuf.h"
+-
+-#ifndef MQ_IOC_BULK_PEEK
+-#ifndef BIT
+-#define BIT(nr) (1UL << (nr))
+-#endif
+-
+-#define MQ_PEEK_FLAG_HAS_MORE  BIT(0)
+-#define ALIGN8(x) (((x) + 7) & ~(size_t)7)
+-
+-struct mq_bulk_peek_args {
+-    uint32_t start_idx;
+-    uint32_t start_offset;
+-    uint32_t max_count;
+-    uint32_t reserved_in;
+-    uint64_t buf_ptr;
+-    uint64_t buf_size;
+-    uint32_t out_count;
+-    uint32_t next_idx;
+-    uint32_t next_offset;
+-    uint32_t reserved_out;
+-};
+-
+-struct mq_peek_msg_hdr {
+-    uint32_t total_msg_len;
+-    uint32_t chunk_len;
+-    uint32_t msg_prio;
+-    uint32_t flags;
+-    uint8_t  payload[];
+-};
+-
+-#define MQ_IOC_BULK_PEEK _IOWR('M', 1, struct mq_bulk_peek_args)
+-#endif /* MQ_IOC_BULK_PEEK */
+-
+-#define PEEK_BUF_SIZE 8192
+-int pmq_peek_messages(int fd, struct mqueue_message *msgs, long nmsgs, long msgsize)
+-{
+-    char peek_buf[PEEK_BUF_SIZE];
+-    struct mq_bulk_peek_args args = { .max_count = 128 };
+-    uint32_t current_msg_idx = 0;
+-    size_t current_msg_offset = 0;
+-
+-    args.buf_ptr = (uint64_t)(uintptr_t)peek_buf;
+-    args.buf_size = sizeof(peek_buf);
+-
+-    pr_info("Peeking up to %ld messages from mqueue fd %d\n", nmsgs, fd);
+-
+-    while (current_msg_idx < nmsgs) {
+-        if (ioctl(fd, MQ_IOC_BULK_PEEK, &args) < 0) {
+-            pr_perror("Failed to bulk peek mqueue (fd: %d)", fd);
+-            return -1;
+-        }
+-
+-        if (args.out_count == 0)
+-            break;
+-
+-        size_t offset = 0;
+-        for (uint32_t i = 0; i < args.out_count; i++) {
+-            if (current_msg_idx >= nmsgs) {
+-                pr_warn("Kernel returned more messages than expected (%ld)\n", nmsgs);
+-                return 0; 
+-            }
+-
+-            struct mq_peek_msg_hdr *hdr = (struct mq_peek_msg_hdr *)(peek_buf + offset);
+-
+-            if (current_msg_offset == 0) {
+-                msgs[current_msg_idx].prio = hdr->msg_prio;
+-                msgs[current_msg_idx].len = hdr->total_msg_len;
+-                msgs[current_msg_idx].data = xmalloc(hdr->total_msg_len);
+-                if (!msgs[current_msg_idx].data)
+-                    return -1;
+-            }
+-
+-            if (current_msg_offset + hdr->chunk_len > msgs[current_msg_idx].len) {
+-                pr_err("Chunk size mismatch for msg %u\n", current_msg_idx);
+-                return -1;
+-            }
+-
+-            memcpy(msgs[current_msg_idx].data + current_msg_offset,
+-                   hdr->payload, hdr->chunk_len);
+-
+-            if (hdr->flags & MQ_PEEK_FLAG_HAS_MORE) {
+-                current_msg_offset += hdr->chunk_len;
+-            } else {
+-                current_msg_idx++;
+-                current_msg_offset = 0;
+-            }
+-
+-            offset += ALIGN8(sizeof(*hdr) + hdr->chunk_len);
+-        }
+-
+-        args.start_idx = args.next_idx;
+-        args.start_offset = args.next_offset;
+-    }
+-
+-    return 0;
+-}
+-
+-int dump_pmq_fd(int lfd, struct fd_parms *p, FdinfoEntry *e)
+-{
+-    IpcnsPmqDataEntry pmq = IPCNS_PMQ_DATA_ENTRY__INIT;
+-    struct mqueue_message *msgs = NULL;
+-    struct mq_attr attr;
+-    char path[PATH_MAX];
+-    int ret = -1;
+-
+-    if (mq_getattr((mqd_t)lfd, &attr) < 0) {
+-        pr_perror("Can't get mqueue attributes for fd %d", lfd);
+-        return -1;
+-    }
+-
+-    if (read_fd_link(lfd, path, sizeof(path)) < 0) {
+-        pr_err("Can't read link for pmq fd %d\n", lfd);
+-        return -1;
+-    }
+-
+-    pmq.id = e->id;
+-    pmq.mq_maxmsg = attr.mq_maxmsg;
+-    pmq.mq_msgsize = attr.mq_msgsize;
+-    pmq.mq_curmsgs = attr.mq_curmsgs;
+-    pmq.name = path;
+-
+-    if (pmq.mq_curmsgs > 0) {
+-        msgs = xzalloc(pmq.mq_curmsgs * sizeof(*msgs));
+-        if (!msgs)
+-            goto out;
+-
+-        if (pmq_peek_messages(lfd, msgs, pmq.mq_curmsgs, pmq.mq_msgsize)) {
+-            pr_err("Failed to peek messages for mqueue %s\n", path);
+-            goto out;
+-        }
+-
+-        pmq.n_messages = pmq.mq_curmsgs;
+-        pmq.messages = xmalloc(pmq.n_messages * sizeof(PosixMqueueMsgEntry *));
+-        if (!pmq.messages)
+-            goto out;
+-
+-        for (int i = 0; i < pmq.n_messages; i++) {
+-            pmq.messages[i] = xmalloc(sizeof(PosixMqueueMsgEntry));
+-            posix_mqueue_msg_entry__init(pmq.messages[i]);
+-
+-            pmq.messages[i]->msg_prio = msgs[i].prio;
+-            pmq.messages[i]->msg_len  = msgs[i].len;
+-
+-            pmq.messages[i]->msg_data.len = msgs[i].len;
+-            pmq.messages[i]->msg_data.data = (uint8_t *)msgs[i].data;
+-        }
+-    }
+-
+-    ret = pb_write_one(img_from_set(glob_imgset, CR_FD_IPCNS_PMQ_DATA), &pmq, PB_IPCNS_PMQ_DATA);
+-
+-out:
+-    if (msgs) {
+-        for (int i = 0; i < pmq.mq_curmsgs; i++) {
+-            if (msgs[i].data)
+-                xfree(msgs[i].data);
+-        }
+-        xfree(msgs);
+-    }
+-
+-    if (pmq.messages) {
+-        for (int i = 0; i < pmq.n_messages; i++) {
+-            if (pmq.messages[i])
+-                xfree(pmq.messages[i]);
+-        }
+-        xfree(pmq.messages);
+-    }
+-
+-    return ret;
+-}
+-
+-int restore_pmq_fd(IpcnsPmqDataEntry *pmq)
+-{
+-    struct mq_attr attr = {
+-        .mq_maxmsg = pmq->mq_maxmsg,
+-        .mq_msgsize = pmq->mq_msgsize
+-    };
+-    mqd_t mq;
+-
+-    mq = mq_open(pmq->name, O_CREAT | O_WRONLY | O_NONBLOCK, 0666, &attr);
+-    if (mq == (mqd_t)-1) {
+-        pr_perror("Failed to create mqueue %s", pmq->name);
+-        return -1;
+-    }
+-
+-    for (int i = 0; i < pmq->n_messages; i++) {
+-        PosixMqueueMsgEntry *msg = pmq->messages[i];
+-        if (mq_send(mq, (char *)msg->msg_data.data, msg->msg_data.len, msg->msg_prio) < 0) {
+-            pr_perror("Failed to restore message %d", i);
+-            mq_close(mq);
+-            return -1;
+-        }
+-    }
+-
+-    pr_info("Successfully restored mqueue %s with %zu messages\n", pmq->name, pmq->n_messages);
+-    return mq;
+-}
+\ No newline at end of file
+diff --git a/criu/protobuf-desc.c b/criu/protobuf-desc.c
+index dd85ec1cd..e0dbfccc2 100644
+--- a/criu/protobuf-desc.c
++++ b/criu/protobuf-desc.c
+@@ -43,7 +43,6 @@
+ #include "images/ipc-shm.pb-c.h"
+ #include "images/ipc-msg.pb-c.h"
+ #include "images/ipc-sem.pb-c.h"
+-#include "images/posix-mqueue.pb-c.h"
+ #include "images/fs.pb-c.h"
+ #include "images/remap-file-path.pb-c.h"
+ #include "images/ghost-file.pb-c.h"
+diff --git a/criu/sk-queue.c b/criu/sk-queue.c
+index 37183296d..1af9a6aed 100644
+--- a/criu/sk-queue.c
++++ b/criu/sk-queue.c
+@@ -120,8 +120,17 @@ static int dump_scm_rights(struct cmsghdr *ch, SkPacketEntry *pe)
+ /*
+  * Maximum size of the control messages. XXX -- is there any
+  * way to get this value out of the kernel?
+- * */
+-#define CMSG_MAX_SIZE 1024
++ *
++ * The kernel limits SCM_RIGHTS to SCM_MAX_FD (253) file descriptors,
++ * defined in include/net/scm.h. A single packet can carry multiple
++ * SCM types simultaneously:
++ *   - SCM_RIGHTS:      CMSG_SPACE(253 * sizeof(int)) = 1032 bytes
++ *   - SCM_CREDENTIALS: CMSG_SPACE(sizeof(struct ucred)) = 32 bytes
++ *   - SCM_PIDFD:       CMSG_SPACE(sizeof(int)) = 24 bytes
++ *
++ * Total worst case: ~1088 bytes. Round up to 2048 for safety.
++ */
++#define CMSG_MAX_SIZE 2048
+ 
+ static int dump_packet_cmsg(struct msghdr *mh, SkPacketEntry *pe)
+ {
+diff --git a/images/Makefile b/images/Makefile
+index 862487925..2c33152e9 100644
+--- a/images/Makefile
++++ b/images/Makefile
+@@ -74,7 +74,6 @@ proto-obj-y	+= bpfmap-data.o
+ proto-obj-y	+= apparmor.o
+ proto-obj-y	+= rseq.o
+ proto-obj-y	+= pidfd.o
+-proto-obj-y	+= posix-mqueue.o
+ 
+ CFLAGS		+= -iquote $(obj)/
+ 
+diff --git a/images/fdinfo.proto b/images/fdinfo.proto
+index a84055e3a..32ec13cf4 100644
+--- a/images/fdinfo.proto
++++ b/images/fdinfo.proto
+@@ -21,7 +21,6 @@ import "pidfd.proto";
+ import "tty.proto";
+ import "memfd.proto";
+ import "bpfmap-file.proto";
+-import "posix-mqueue.proto";
+ 
+ enum fd_types {
+ 	UND		= 0;
+@@ -45,7 +44,6 @@ enum fd_types {
+ 	MEMFD		= 18;
+ 	BPFMAP		= 19;
+ 	PIDFD           = 20;
+-	PQEFD		= 21;
+ 
+ 	/* Any number above the real used. Not stored to image */
+ 	CTL_TTY		= 65534;
+@@ -83,5 +81,4 @@ message file_entry {
+ 	optional memfd_file_entry	memfd	= 20;
+ 	optional bpfmap_file_entry	bpf	= 21;
+ 	optional pidfd_entry		pidfd   = 22;
+-	optional ipcns_pmq_data_entry pqmfd = 23;
+ }
+diff --git a/images/posix-mqueue.proto b/images/posix-mqueue.proto
+deleted file mode 100644
+index 0b6bcbb0e..000000000
+--- a/images/posix-mqueue.proto
++++ /dev/null
+@@ -1,18 +0,0 @@
+-syntax = "proto2";
+-
+-message posix_mqueue_msg_entry {
+-    required uint32 msg_prio = 1;
+-    required uint32 msg_len  = 2;
+-    required bytes  msg_data = 3;
+-}
+-
+-message ipcns_pmq_data_entry {
+-    required uint32 id          = 1;
+-    required string name        = 2;
+-
+-    required uint32 mq_maxmsg   = 3;
+-    required uint32 mq_msgsize  = 4;
+-    required uint32 mq_curmsgs  = 5;
+-
+-    repeated posix_mqueue_msg_entry messages = 6;
+-}
+\ No newline at end of file
+diff --git a/test/zdtm.py b/test/zdtm.py
+index 07e0a8c8d..0c4749287 100755
+--- a/test/zdtm.py
++++ b/test/zdtm.py
+@@ -434,7 +434,7 @@ class zdtm_test:
+         self.__name = name
+         self.__desc = desc
+         self.__freezer = None
+-        self.__timeout = int(self.__desc.get('timeout') or 300)
++        self.__timeout = int(self.__desc.get('timeout') or 30)
+         self.__rootless = rootless
+         self.__make_action('cleanout')
+         self.__pid = 0
+diff --git a/test/zdtm/static/Makefile b/test/zdtm/static/Makefile
+index 684dc10ed..95aaa6fc2 100644
+--- a/test/zdtm/static/Makefile
++++ b/test/zdtm/static/Makefile
+@@ -288,7 +288,6 @@ TST_NOFILE	:=				\
+ 		sigtrap01			\
+ 		change_mnt_context		\
+ 		fd_offset			\
+-		posix-mqueue			\
+ #		jobctl00			\
+ 
+ PKG_CONFIG ?= pkg-config
+@@ -740,8 +739,6 @@ cgroupv2_01:		LDLIBS += -pthread
+ uprobes:		CFLAGS += $(call pkg-cflags, libtracefs libtraceevent)
+ uprobes:		LDLIBS += $(call pkg-libs, libtracefs libelf)
+ 
+-posix-mqueue:		LDLIBS += -lrt
+-
+ $(LIB):	force
+ 	$(Q) $(MAKE) -C $(LIBDIR)
+ 
+diff --git a/test/zdtm/static/posix-mqueue.c b/test/zdtm/static/posix-mqueue.c
+deleted file mode 100644
+index a2867f988..000000000
+--- a/test/zdtm/static/posix-mqueue.c
++++ /dev/null
+@@ -1,94 +0,0 @@
+-#include <fcntl.h>
+-#include <sys/stat.h>
+-#include <mqueue.h>
+-#include <stdio.h>
+-#include <stdlib.h>
+-#include <string.h>
+-#include <unistd.h>
+-#include <errno.h>
+-
+-#include "zdtmtst.h"
+-
+-const char *test_doc = "Test checkpoint/restore of POSIX message queues";
+-const char *test_author = "sunchao dong <dongsunchao@gmail.com>";
+-
+-#define MQ_NAME "/zdtm_posix_mqueue_test"
+-#define MAX_MSG_SIZE 256
+-
+-struct test_msg {
+-    unsigned int prio;
+-    char data[MAX_MSG_SIZE];
+-} msgs_to_send[] = {
+-    { 10, "Message A: Priority 10 (First in)" },
+-    { 20, "Message B: Priority 20 (Highest)" },
+-    { 10, "Message C: Priority 10 (Second in)" },
+-    {  5, "Message D: Priority 5 (Lowest)" }
+-};
+-
+-#define MSG_COUNT (sizeof(msgs_to_send) / sizeof(msgs_to_send[0]))
+-
+-int expected_order[] = { 1, 0, 2, 3 };
+-
+-int main(int argc, char **argv)
+-{
+-    mqd_t mq;
+-    struct mq_attr attr = {
+-        .mq_maxmsg = 10,
+-        .mq_msgsize = MAX_MSG_SIZE
+-    };
+-    int i;
+-
+-    test_init(argc, argv);
+-
+-    mq_unlink(MQ_NAME);
+-
+-    mq = mq_open(MQ_NAME, O_CREAT | O_RDWR, 0666, &attr);
+-    if (mq == (mqd_t)-1) {
+-        pr_perror("mq_open failed");
+-        exit(1);
+-    }
+-
+-    test_msg("Sending messages to mqueue...\n");
+-    for (i = 0; i < MSG_COUNT; i++) {
+-        if (mq_send(mq, msgs_to_send[i].data, strlen(msgs_to_send[i].data), msgs_to_send[i].prio) == -1) {
+-            pr_perror("mq_send failed at index %d", i);
+-            exit(1);
+-        }
+-    }
+-
+-    test_daemon();
+-    test_waitsig();
+-
+-    test_msg("Restored! Receiving and verifying messages...\n");
+-    for (i = 0; i < MSG_COUNT; i++) {
+-        char buf[MAX_MSG_SIZE + 1];
+-        unsigned int prio;
+-        ssize_t n;
+-        int exp_idx; 
+-
+-        n = mq_receive(mq, buf, MAX_MSG_SIZE, &prio);
+-        if (n == -1) {
+-            pr_perror("mq_receive failed at iteration %d", i);
+-            fail("Failed to receive all expected messages.");
+-            exit(1);
+-        }
+-        buf[n] = '\0';
+-
+-        exp_idx = expected_order[i];
+-        
+-        if (prio != msgs_to_send[exp_idx].prio || strcmp(buf, msgs_to_send[exp_idx].data) != 0) {
+-            fail("Mismatch at receive #%d!\nExpected: [Prio %u] '%s'\nGot:      [Prio %u] '%s'",
+-                 i, msgs_to_send[exp_idx].prio, msgs_to_send[exp_idx].data,
+-                 prio, buf);
+-            exit(1);
+-        }
+-        
+-        test_msg("Verified message #%d: [Prio %u] '%s'\n", i, prio, buf);
+-    }
+-
+-    mq_close(mq);
+-    mq_unlink(MQ_NAME);
+-
+-    pass();
+-    return 0;
+-}
+\ No newline at end of file
+diff --git a/test/zdtm/static/posix-mqueue.desc b/test/zdtm/static/posix-mqueue.desc
+deleted file mode 100644
+index de23ede1c..000000000
+--- a/test/zdtm/static/posix-mqueue.desc
++++ /dev/null
+@@ -1 +0,0 @@
+-{'flavor': 'h', 'flags': 'suid'}
+\ No newline at end of file

@@ -290,6 +290,10 @@ TST_NOFILE	:=				\
 		change_mnt_context		\
 		fd_offset			\
 		posix-mqueue			\
+		posix-mqueue-big-chunk		\
+		mqueue_unlinked			\
+		mqueue_ipcns			\
+		mqueue_fown			\
 #		jobctl00			\
 
 PKG_CONFIG ?= pkg-config
@@ -741,7 +745,11 @@ cgroupv2_01:		LDLIBS += -pthread
 uprobes:		CFLAGS += $(call pkg-cflags, libtracefs libtraceevent)
 uprobes:		LDLIBS += $(call pkg-libs, libtracefs libelf)
 
-posix-mqueue:		LDLIBS += -lrt
+posix-mqueue:			LDLIBS += -lrt
+posix-mqueue-big-chunk:		LDLIBS += -lrt
+mqueue_unlinked:		LDLIBS += -lrt
+mqueue_ipcns:			LDLIBS += -lrt
+mqueue_fown:			LDLIBS += -lrt
 
 $(LIB):	force
 	$(Q) $(MAKE) -C $(LIBDIR)

@@ -164,6 +164,28 @@ static int dump_one_pmq_fd(int lfd, u32 id, const struct fd_parms *p)
 		return -1;
 	}
 
+	/*
+	 * When mq_unlink() is called while the fd is still open, the VFS
+	 * appends " (deleted)" to the path returned by readlink().  Detect
+	 * this suffix, strip it to recover the original queue name, and set
+	 * the unlinked flag so the restore path can recreate a truly anonymous
+	 * (unlinked) fd instead of leaving a named queue in /dev/mqueue.
+	 */
+	{
+		static const char deleted_sfx[] = " (deleted)";
+		size_t nlen = strlen(pmq.name);
+		size_t slen = sizeof(deleted_sfx) - 1;
+
+		if (nlen > slen &&
+		    memcmp(pmq.name + nlen - slen, deleted_sfx, slen) == 0) {
+			pmq.name[nlen - slen] = '\0';
+			pmq.unlinked = 1;
+			pmq.has_unlinked = 1;
+			pr_info("mqueue fd %d was unlinked; saved name '%s'\n",
+				lfd, pmq.name);
+		}
+	}
+
 	pmq.id = id;
 	pmq.mq_maxmsg = attr.mq_maxmsg;
 	pmq.mq_msgsize = attr.mq_msgsize;
@@ -246,6 +268,8 @@ static int pmq_open(struct file_desc *d, int *new_fd)
 	struct mqueue_file_info *info;
 	IpcnsPmqDataEntry *pmq;
 	struct mq_attr attr;
+	const char *open_name;
+	char ghost_name[64];
 	mqd_t mq;
 	int i;
 
@@ -257,17 +281,42 @@ static int pmq_open(struct file_desc *d, int *new_fd)
 	attr.mq_flags   = 0;
 	attr.mq_curmsgs = 0;
 
-	/*
-	 * Unlink any pre-existing queue: after dump the process is killed
-	 * but the named queue lingers.  We must recreate it from scratch
-	 * so the saved messages are the only ones present.
-	 */
-	mq_unlink(pmq->name);
+	if (pmq->has_unlinked && pmq->unlinked) {
+		/*
+		 * Ghost-mqueue restore path.
+		 *
+		 * The queue name was absent from the mqueue filesystem at dump
+		 * time (mq_unlink() had already been called).  We must hand
+		 * the restored process an fd that is equally anonymous:
+		 *
+		 *   1. Pick a collision-proof temporary name.
+		 *   2. Create the queue under that name.
+		 *   3. Replay all saved messages.
+		 *   4. Unlink the name *before* returning the fd.
+		 *
+		 * After step 4 the fd is valid but invisible in /dev/mqueue,
+		 * exactly mirroring the state at dump time.
+		 */
+		snprintf(ghost_name, sizeof(ghost_name),
+			 "/criu-ghost-mq-%x", pmq->id);
+		mq_unlink(ghost_name);	/* remove any leftover from a failed run */
+		open_name = ghost_name;
+	} else {
+		/*
+		 * Normal named-queue restore path.
+		 *
+		 * Unlink any pre-existing queue: after dump the process is
+		 * killed but the named queue lingers.  Recreate it from
+		 * scratch so the saved messages are the only ones present.
+		 */
+		mq_unlink(pmq->name);
+		open_name = pmq->name;
+	}
 
-	mq = mq_open(pmq->name, O_CREAT | O_EXCL | O_RDWR | O_NONBLOCK,
+	mq = mq_open(open_name, O_CREAT | O_EXCL | O_RDWR | O_NONBLOCK,
 		     0666, &attr);
 	if (mq == (mqd_t)-1) {
-		pr_perror("Failed to create mqueue %s", pmq->name);
+		pr_perror("Failed to create mqueue %s", open_name);
 		return -1;
 	}
 
@@ -280,20 +329,35 @@ static int pmq_open(struct file_desc *d, int *new_fd)
 
 		if (mq_send(mq, (char *)msg->msg_data.data,
 			    msg->msg_data.len, msg->msg_prio) < 0) {
-			pr_perror("Failed to restore message %d to %s", i, pmq->name);
+			pr_perror("Failed to restore message %d to %s",
+				  i, open_name);
 			mq_close(mq);
 			return -1;
 		}
 	}
 
+	/*
+	 * Ghost path: erase the temporary name now that all messages are in.
+	 * The fd stays open and fully functional; only the name disappears.
+	 */
+	if (pmq->has_unlinked && pmq->unlinked) {
+		if (mq_unlink(open_name) < 0) {
+			pr_perror("Failed to unlink ghost mqueue %s", open_name);
+			mq_close(mq);
+			return -1;
+		}
+		pr_info("Restored ghost POSIX mqueue (was '%s') with %zu messages\n",
+			pmq->name, pmq->n_messages);
+	} else {
+		pr_info("Restored POSIX mqueue '%s' with %zu messages\n",
+			pmq->name, pmq->n_messages);
+	}
+
 	if (rst_file_params(mq, pmq->fown, pmq->flags)) {
-		pr_perror("Can't restore params for mqueue %s", pmq->name);
+		pr_perror("Can't restore params for mqueue %s", open_name);
 		mq_close(mq);
 		return -1;
 	}
-
-	pr_info("Restored POSIX mqueue '%s' with %zu messages\n",
-		pmq->name, pmq->n_messages);
 
 	list_add_tail(&info->rlist, &rst_pmqueues);
 

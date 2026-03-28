@@ -20,4 +20,14 @@ message ipcns_pmq_data_entry {
 
     required uint32    flags = 7;
     required fown_entry fown = 8;
+
+    /*
+     * Set when the queue name was absent from the mqueue filesystem at dump
+     * time (i.e. mq_unlink() was called after mq_open() but the fd was
+     * still open).  On restore a temporary named queue is created, all
+     * messages are replayed into it, and the name is immediately unlinked so
+     * the restored fd is an anonymous (unlinked) mqueue — mirroring the
+     * state at dump time.
+     */
+    optional bool unlinked = 9 [default = false];
 }
