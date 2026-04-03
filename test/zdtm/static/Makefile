@@ -26,6 +26,7 @@ TST_NOFILE	:=				\
 		timers				\
 		timers01			\
 		timerfd				\
+		timerslack_ns			\
 		unbound_sock			\
 		sched_prio00			\
 		sched_policy00			\
@@ -67,12 +68,14 @@ TST_NOFILE	:=				\
 		pipe00				\
 		pipe01				\
 		pipe02				\
+		pipe_owner			\
 		pthread00			\
 		pthread00-pac			\
 		pthread01			\
 		pthread02			\
 		pthread_timers			\
 		pthread_timers_h		\
+		leader_posix_timer		\
 		rseq00				\
 		membarrier			\
 		vdso00				\
@@ -365,6 +368,7 @@ TST_FILE	=				\
 		file_lease02			\
 		file_lease03			\
 		file_lease04			\
+		file_lease05			\
 		file_locks00			\
 		file_locks00_fail		\
 		file_locks01			\
@@ -612,11 +616,13 @@ pthread01:		LDLIBS += -pthread
 pthread02:		LDLIBS += -pthread
 pthread_timers:		LDLIBS += -lrt -pthread
 pthread_timers_h:	LDLIBS += -lrt -pthread
+leader_posix_timer:	LDLIBS += -lrt -pthread
 different_creds:	LDLIBS += -pthread
 sigpending:		LDLIBS += -pthread
 sigaltstack:		LDLIBS += -pthread
 seccomp_filter_tsync:	LDLIBS += -pthread
 seccomp_filter_threads:	LDLIBS += -pthread
+timerslack_ns:		LDLIBS += -pthread
 shm:			CFLAGS += -DNEW_IPC_NS
 msgque:			CFLAGS += -DNEW_IPC_NS
 sem:			CFLAGS += -DNEW_IPC_NS

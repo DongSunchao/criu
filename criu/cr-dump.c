@@ -755,6 +755,8 @@ int dump_thread_core(int pid, CoreEntry *core, const struct parasite_dump_thread
 			tc->has_pdeath_sig = true;
 			tc->pdeath_sig = ti->pdeath_sig;
 		}
+		tc->has_timerslack_ns = true;
+		tc->timerslack_ns = ti->timerslack_ns;
 		tc->comm = xstrdup(ti->comm);
 		if (tc->comm == NULL)
 			return -1;
@@ -1672,6 +1674,7 @@ static int dump_one_task(struct pstree_item *item, InventoryEntry *parent_ie)
 	}
 
 	item->pid->ns[0].virt = misc.pid;
+	item->threads[0].ns[0].virt = misc.pid;
 	pstree_insert_pid(item->pid);
 	item->sid = misc.sid;
 	item->pgid = misc.pgid;
@@ -2098,7 +2101,6 @@ static int cr_dump_finish(int ret)
 		unsuspend_lsm();
 		network_unlock();
 		delete_link_remaps();
-		clean_cr_time_mounts();
 	}
 
 	if (!ret && opts.lazy_pages)
@@ -2116,7 +2118,7 @@ static int cr_dump_finish(int ret)
 	free_file_locks();
 	free_link_remaps();
 	free_aufs_branches();
-	free_userns_maps();
+	free_userns_data();
 
 	close_service_fd(CR_PROC_FD_OFF);
 	close_image_dir();

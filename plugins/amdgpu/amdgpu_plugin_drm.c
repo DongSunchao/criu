@@ -193,10 +193,11 @@ static int restore_bo_contents_drm(int drm_render_minor, CriuRenderNode *rd, int
 
 	buffer_size = max_bo_size;
 
-	posix_memalign(&buffer, sysconf(_SC_PAGE_SIZE), buffer_size);
-	if (!buffer) {
+	ret = posix_memalign(&buffer, sysconf(_SC_PAGE_SIZE), buffer_size);
+	if (ret) {
+		errno = ret;
 		pr_perror("Failed to alloc aligned memory. Consider setting KFD_MAX_BUFFER_SIZE.");
-		ret = -ENOMEM;
+		ret = -ret;
 		goto exit;
 	}
 
@@ -209,7 +210,11 @@ static int restore_bo_contents_drm(int drm_render_minor, CriuRenderNode *rd, int
 
 		snprintf(img_path, sizeof(img_path), IMG_DRM_PAGES_FILE, rd->id, drm_render_minor, i);
 
-		bo_contents_fp = open_img_file(img_path, false, &image_size);
+		bo_contents_fp = open_img_file(img_path, false, &image_size, true);
+		if (!bo_contents_fp) {
+			ret = -errno;
+			break;
+		}
 
 		ret = sdma_copy_bo(dmabufs[i], rd->bo_entries[i]->size, bo_contents_fp, buffer, buffer_size, h_dev, max_copy_size,
 				   SDMA_OP_VRAM_WRITE, true);
@@ -246,7 +251,7 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 	size_t image_size;
 	struct tp_node *tp_node;
 	struct drm_amdgpu_gem_list_handles list_handles_args = { 0 };
-	struct drm_amdgpu_gem_list_handles_entry *list_handles_entries;
+	struct drm_amdgpu_gem_list_handles_entry *list_handles_entries = NULL;
 	int num_bos;
 
 	rd = xmalloc(sizeof(*rd));
@@ -263,6 +268,10 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 
 	num_bos = 8;
 	list_handles_entries = xzalloc(sizeof(struct drm_amdgpu_gem_list_handles_entry) * num_bos);
+	if (!list_handles_entries) {
+		ret = -ENOMEM;
+		goto exit;
+	}
 	list_handles_args.num_entries = num_bos;
 	list_handles_args.entries = (uintptr_t)list_handles_entries;
 
@@ -279,6 +288,10 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 		num_bos = list_handles_args.num_entries;
 		xfree(list_handles_entries);
 		list_handles_entries = xzalloc(sizeof(struct drm_amdgpu_gem_list_handles_entry) * num_bos);
+		if (!list_handles_entries) {
+			ret = -ENOMEM;
+			goto exit;
+		}
 		list_handles_args.num_entries = num_bos;
 		list_handles_args.entries = (uintptr_t)list_handles_entries;
 		ret = drmIoctl(fd, DRM_IOCTL_AMDGPU_GEM_LIST_HANDLES, &list_handles_args);
@@ -329,6 +342,10 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 		boinfo->offset = mmap_args.out.addr_ptr;
 
 		vm_info_entries = xzalloc(sizeof(struct drm_amdgpu_gem_vm_entry) * num_vm_entries);
+		if (!vm_info_entries) {
+			ret = -ENOMEM;
+			goto exit;
+		}
 		vm_info_args.handle = handle_entry.gem_handle;
 		vm_info_args.num_entries = num_vm_entries;
 		vm_info_args.value = (uintptr_t)vm_info_entries;
@@ -336,6 +353,7 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 		ret = drmIoctl(fd, DRM_IOCTL_AMDGPU_GEM_OP, &vm_info_args);
 		if (ret) {
 			pr_perror("Failed to call vm info ioctl");
+			xfree(vm_info_entries);
 			goto exit;
 		}
 
@@ -343,6 +361,10 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 			num_vm_entries = vm_info_args.num_entries;
 			xfree(vm_info_entries);
 			vm_info_entries = xzalloc(sizeof(struct drm_amdgpu_gem_vm_entry) * num_vm_entries);
+			if (!vm_info_entries) {
+				ret = -ENOMEM;
+				goto exit;
+			}
 			vm_info_args.handle = handle_entry.gem_handle;
 			vm_info_args.num_entries = num_vm_entries;
 			vm_info_args.value = (uintptr_t)vm_info_entries;
@@ -350,6 +372,7 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 			ret = drmIoctl(fd, DRM_IOCTL_AMDGPU_GEM_OP, &vm_info_args);
 			if (ret) {
 				pr_perror("Failed to call vm info ioctl");
+				xfree(vm_info_entries);
 				goto exit;
 			}
 		} else {
@@ -358,8 +381,10 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 
 		boinfo->num_of_vms = num_vm_entries;
 		ret = allocate_vm_entries(boinfo, num_vm_entries);
-		if (ret)
+		if (ret) {
+			xfree(vm_info_entries);
 			goto exit;
+		}
 
 		for (int j = 0; j < num_vm_entries; j++) {
 			DrmVmEntry *vminfo = boinfo->vm_entries[j];
@@ -372,18 +397,48 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 		}
 
 		ret = amdgpu_device_initialize(fd, &major, &minor, &h_dev);
+		if (ret) {
+			pr_perror("Failed to initialize amdgpu device");
+			xfree(vm_info_entries);
+			goto exit;
+		}
 
 		device_fd = amdgpu_device_get_fd(h_dev);
 
-		drmPrimeHandleToFD(device_fd, boinfo->handle, 0, &dmabuf_fd);
+		ret = drmPrimeHandleToFD(device_fd, boinfo->handle, 0, &dmabuf_fd);
+		if (ret) {
+			pr_perror("Failed to get dmabuf fd from handle");
+			amdgpu_device_deinitialize(h_dev);
+			xfree(vm_info_entries);
+			goto exit;
+		}
 
 		snprintf(img_path, sizeof(img_path), IMG_DRM_PAGES_FILE, rd->id, rd->drm_render_minor, i);
-		bo_contents_fp = open_img_file(img_path, true, &image_size);
+		bo_contents_fp = open_img_file(img_path, true, &image_size, true);
+		if (!bo_contents_fp) {
+			ret = -errno;
+			close(dmabuf_fd);
+			amdgpu_device_deinitialize(h_dev);
+			xfree(vm_info_entries);
+			goto exit;
+		}
 
-		posix_memalign(&buffer, sysconf(_SC_PAGE_SIZE), handle_entry.size);
+		ret = posix_memalign(&buffer, sysconf(_SC_PAGE_SIZE), handle_entry.size);
+		if (ret) {
+			errno = ret;
+			pr_perror("Failed to allocate buffer");
+			ret = -ret;
+			fclose(bo_contents_fp);
+			close(dmabuf_fd);
+			amdgpu_device_deinitialize(h_dev);
+			xfree(vm_info_entries);
+			goto exit;
+		}
 
 		ret = sdma_copy_bo(dmabuf_fd, handle_entry.size, bo_contents_fp, buffer, handle_entry.size, h_dev, 0x1000,
 				   SDMA_OP_VRAM_READ, false);
+
+		xfree(buffer);
 
 		if (dmabuf_fd != KFD_INVALID_FD)
 			close(dmabuf_fd);
@@ -397,7 +452,6 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 
 		xfree(vm_info_entries);
 	}
-	xfree(list_handles_entries);
 
 	for (int i = 0; i < num_bos; i++) {
 		DrmBoEntry *boinfo = rd->bo_entries[i];
@@ -432,7 +486,9 @@ int amdgpu_plugin_drm_dump_file(int fd, int id, struct stat *drm)
 
 	xfree(buf);
 exit:
-	free_e(rd);
+	xfree(list_handles_entries);
+	if (rd)
+		free_e(rd);
 	return ret;
 }
 
@@ -440,16 +496,22 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 {
 	int ret = 0;
 	bool retry_needed = false;
+	bool dev_initialized = false;
+	bool bo_restore_called = false;
 	uint32_t major, minor;
 	amdgpu_device_handle h_dev;
 	int device_fd;
-	int *dmabufs = xzalloc(sizeof(int) * rd->num_of_bos);
+	int *dmabufs = xmalloc(sizeof(int) * rd->num_of_bos);
+	if (!dmabufs)
+		return -ENOMEM;
+	memset(dmabufs, 0xff, sizeof(int) * rd->num_of_bos);
 
 	ret = amdgpu_device_initialize(fd, &major, &minor, &h_dev);
 	if (ret) {
 		pr_info("Error in init amdgpu device\n");
 		goto exit;
 	}
+	dev_initialized = true;
 
 	device_fd = amdgpu_device_get_fd(h_dev);
 
@@ -476,7 +538,16 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 		}
 
 		if (boinfo->is_import) {
-			drmPrimeFDToHandle(device_fd, dmabuf_fd, &handle);
+			if (dmabuf_fd == -1) {
+				retry_needed = true;
+				continue;
+			}
+			ret = drmPrimeFDToHandle(device_fd, dmabuf_fd, &handle);
+			if (ret) {
+				pr_perror("Failed to get handle from dmabuf fd");
+				close(dmabuf_fd);
+				goto exit;
+			}
 		} else {
 			union drm_amdgpu_gem_create create_args = { 0 };
 
@@ -492,7 +563,11 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 			}
 			handle = create_args.out.handle;
 
-			drmPrimeHandleToFD(device_fd, handle, 0, &dmabuf_fd);
+			ret = drmPrimeHandleToFD(device_fd, handle, 0, &dmabuf_fd);
+			if (ret) {
+				pr_perror("Failed to get dmabuf fd from handle");
+				goto exit;
+			}
 		}
 
 		change_args.handle = handle;
@@ -548,22 +623,33 @@ int amdgpu_plugin_drm_restore_file(int fd, CriuRenderNode *rd)
 		goto exit;
 	}
 
+	if (retry_needed)
+		goto exit;
+
 	ret = record_completed_work(-1, rd->drm_render_minor);
 	if (ret)
 		goto exit;
 
-	ret = amdgpu_device_deinitialize(h_dev);
-
 	if (rd->num_of_bos > 0) {
+		bo_restore_called = true;
 		ret = restore_bo_contents_drm(rd->drm_render_minor, rd, fd, dmabufs);
 		if (ret)
 			goto exit;
 	}
 
 exit:
+	if (dev_initialized)
+		amdgpu_device_deinitialize(h_dev);
+	if (ret < 0 && !bo_restore_called) {
+		for (int i = 0; i < rd->num_of_bos; i++) {
+			if (dmabufs[i] != KFD_INVALID_FD)
+				close(dmabufs[i]);
+		}
+	}
+	xfree(dmabufs);
+
 	if (ret < 0)
 		return ret;
-	xfree(dmabufs);
 
 	return retry_needed;
 }
