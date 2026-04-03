@@ -273,11 +273,13 @@ class ns_flavor:
 
     def __construct_root(self):
         for dir in self.__root_dirs:
-            os.mkdir(self.root + dir)
+            os.makedirs(self.root + dir, exist_ok=True)
             os.chmod(self.root + dir, 0o777)
 
         for ldir in ["/bin", "/sbin", "/lib", "/lib64"]:
-            os.symlink(".." + ldir, self.root + "/usr" + ldir)
+            dst = self.root + "/usr" + ldir
+            if not os.path.lexists(dst):
+                os.symlink(".." + ldir, dst)
 
     def __construct_dev(self):
         for dir in self.__dev_dirs:
@@ -305,13 +307,18 @@ class ns_flavor:
             ["mount", "--make-private", "--bind", ".", self.root])
         self.root_mounted = True
 
-        if not os.access(self.root + "/.constructed", os.F_OK):
+        root_complete = os.access(self.root + "/.constructed", os.F_OK) and \
+            all(os.path.isdir(self.root + d) for d in self.__root_dirs)
+        if not root_complete:
             with open(os.path.abspath(__file__)) as o:
                 fcntl.flock(o, fcntl.LOCK_EX)
-                if not os.access(self.root + "/.constructed", os.F_OK):
+                root_complete = os.access(self.root + "/.constructed", os.F_OK) and \
+                    all(os.path.isdir(self.root + d) for d in self.__root_dirs)
+                if not root_complete:
                     print("Construct root for %s" % l_bins[0])
                     self.__construct_root()
-                    os.mknod(self.root + "/.constructed", stat.S_IFREG | 0o600)
+                    if not os.access(self.root + "/.constructed", os.F_OK):
+                        os.mknod(self.root + "/.constructed", stat.S_IFREG | 0o600)
 
         if not os.access(self.devpath + "/.constructed", os.F_OK):
             self.__construct_dev()
